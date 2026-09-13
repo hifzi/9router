@@ -1,9 +1,9 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
-import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
+import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy.js";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
+import { getAntigravityQuotaCache, getAntigravityModelQuota, isAntigravityPoolBlocked } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -89,13 +89,22 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       if (isModelLockActive(c, model)) return false;
       const enabled = c.providerSpecificData?.enabledModels;
       if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
-      // Antigravity: skip if live quota exhausted for this model
+      // Antigravity: skip if live quota exhausted for this model's POOL
+      // (quota is metered per pool: gemini vs claude_gpt — see #3274/#3012).
+      // A single upstream 503 "No capacity" also pool-blocks the account:
+      // if one request doesn't fit, the next turn of the same task won't
+      // either. Skip events are high-frequency and low-signal; the block
+      // itself is announced once at creation (warn in antigravityQuota.js).
       if (isAntigravity && model && antigravityQuotaCache) {
         const connQuotas = antigravityQuotaCache.get(c.id);
         const quota = getAntigravityModelQuota(connQuotas, model) || connQuotas?.[model];
         if (quota && quota.remainingPercentage <= 0 && quota.resetAt && new Date(quota.resetAt).getTime() > Date.now()) {
-          const account = c.id?.slice(0, 8) || "unknown";
-          log.info("AG_QUOTA", `${account} | CACHE_BLOCK ${model} — skip upstream until ${quota.resetAt}`);
+          log.debug("AG_QUOTA", `${c.id?.slice(0, 8)} | skip ${model} — blocked until ${quota.resetAt}`);
+          return false;
+        }
+        const poolBlock = isAntigravityPoolBlocked(antigravityQuotaCache.get(c.id), model);
+        if (poolBlock.blocked) {
+          log.debug("AG_QUOTA", `${c.id?.slice(0, 8)} | skip ${model} — ${poolBlock.reason} blocked until ${poolBlock.resetAt}`);
           return false;
         }
       }
@@ -120,7 +129,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         connections.forEach((c) => {
           const connQuotas = antigravityQuotaCache.get(c.id);
           const quota = getAntigravityModelQuota(connQuotas, model) || connQuotas?.[model];
-          const resetAt = quota?.resetAt;
+          const resetAt = quota?.resetAt || isAntigravityPoolBlocked(connQuotas, model).resetAt;
           if (resetAt && new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
         });
       }
@@ -274,9 +283,21 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   const reason = typeof errorText === "string" ? errorText.slice(0, 200) : "Provider error";
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
+  // Antigravity quota errors never poison the ACCOUNT status: quota is metered
+  // per POOL (gemini vs claude_gpt), so one exhausted pool must not mark the
+  // whole account "unavailable" while the sibling pool still has quota. The
+  // RAM quota cache (antigravityQuota.js) handles pool-scoped skipping with
+  // the exact resetAt; persisting an account-level modelLock/testStatus here
+  // would wrongly disable the account in the dashboard and for other models.
+  const isAntigravityQuotaError = resolveProviderId(provider) === "antigravity"
+    && resetsAtMs && resetsAtMs > Date.now()
+    && (status === 429 || status === 409);
+
   await updateProviderConnection(connectionId, {
     ...lockUpdate,
-    testStatus: "unavailable",
+    ...(isAntigravityQuotaError
+      ? {} // keep testStatus untouched — pool skip is handled in RAM cache
+      : { testStatus: "unavailable" }),
     lastError: reason,
     errorCode: status,
     lastErrorAt: new Date().toISOString(),
@@ -285,7 +306,11 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
 
   const lockKey = Object.keys(lockUpdate)[0];
   const connName = conn?.displayName || conn?.name || conn?.email || connectionId.slice(0, 8);
-  log.warn("AUTH", `${connName} locked ${lockKey} for ${Math.round(cooldownMs / 1000)}s [${status}]`);
+  if (isAntigravityQuotaError) {
+    log.warn("AUTH", `${connName} pool-exhausted ${model} until ${new Date(resetsAtMs).toISOString()} [${status}] — account stays available for the other pool`);
+  } else {
+    log.warn("AUTH", `${connName} locked ${lockKey} for ${Math.round(cooldownMs / 1000)}s [${status}]`);
+  }
 
   if (provider && status && reason) {
     console.error(`❌ ${provider} [${status}]: ${reason}`);
