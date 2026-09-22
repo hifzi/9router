@@ -71,11 +71,14 @@ describe("pool mapping", () => {
   it("maps every model family to the correct pool", () => {
     expect(getAntigravityQuotaPool(GEMINI)).toBe("gemini");
     expect(getAntigravityQuotaPool(GEMINI_SIBLING)).toBe("gemini");
+    expect(getAntigravityQuotaPool("gemini-4-argon-high")).toBe("gemini");
+    expect(getAntigravityQuotaPool("gemini-4-argon")).toBe("gemini");
     expect(getAntigravityQuotaPool(GEMINI_IMAGE)).toBe("gemini");
     expect(getAntigravityQuotaPool("gemini-3.1-pro-low")).toBe("gemini");
     expect(getAntigravityQuotaPool("gemini-pro-agent")).toBe("gemini");
     expect(getAntigravityQuotaPool(CLAUDE)).toBe("claude_gpt");
     expect(getAntigravityQuotaPool(CLAUDE_SIBLING)).toBe("claude_gpt");
+    expect(getAntigravityQuotaPool("claude-sonnet-5-5-high")).toBe("claude_gpt");
     expect(getAntigravityQuotaPool(GPT_OSS)).toBe("claude_gpt");
     expect(getAntigravityQuotaPool("")).toBeNull();
   });

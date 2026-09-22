@@ -6,7 +6,7 @@
 
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { getAntigravityUsage } from "open-sse/services/usage/google.js";
-import { getAntigravityQuotaPool, findPoolBlockForModel, synthesizePoolBlock } from "./antigravityQuotaPools.js";
+import { getAntigravityQuotaPool, findPoolBlockForModel, synthesizePoolBlock, getPoolModels } from "./antigravityQuotaPools.js";
 import * as log from "../utils/logger.js";
 
 // In-memory cache: connectionId → { [modelId]: { remainingPercentage, resetAt } }
@@ -86,6 +86,9 @@ export function getAntigravityModelQuota(quotas, model) {
   }
 
   // 2. Direct tier aliases if base model was passed
+  if (cleanModel === "gemini-4-argon" && quotas["gemini-4-argon-high"]) {
+    candidates.push(quotas["gemini-4-argon-high"]);
+  }
   if (cleanModel === "claude-sonnet-5-5" && quotas["claude-sonnet-5-5-high"]) {
     candidates.push(quotas["claude-sonnet-5-5-high"]);
   }
@@ -104,9 +107,11 @@ export function getAntigravityModelQuota(quotas, model) {
 
   // 3. Shared family summary buckets (5h session & Weekly)
   if (family === "claude_gpt") {
+    if (quotas.claude_gpt_5h) candidates.push(quotas.claude_gpt_5h);
     if (quotas.claude_gpt_session) candidates.push(quotas.claude_gpt_session);
     if (quotas.claude_gpt_weekly) candidates.push(quotas.claude_gpt_weekly);
   } else if (family === "gemini") {
+    if (quotas.gemini_5h) candidates.push(quotas.gemini_5h);
     if (quotas.gemini_session) candidates.push(quotas.gemini_session);
     if (quotas.gemini_weekly) candidates.push(quotas.gemini_weekly);
   }
@@ -165,6 +170,20 @@ export function clearAntigravityStrikes(connectionId, model) {
   const iso = new Date(until).toISOString();
   if (cached?.[model]?.resetAt === iso) {
     delete cached[model];
+  }
+  const pool = getAntigravityQuotaPool(model);
+  if (pool && cached) {
+    if (cached[`${pool}_weekly`]?.resetAt === iso) delete cached[`${pool}_weekly`];
+    if (cached[`${pool}_5h`]?.resetAt === iso) delete cached[`${pool}_5h`];
+    if (cached[`${pool}_session`]?.resetAt === iso) delete cached[`${pool}_session`];
+    for (const poolModel of getPoolModels(pool)) {
+      if (cached[poolModel]?.resetAt === iso) delete cached[poolModel];
+    }
+    for (const [k, u] of strikeBlocks) {
+      if (k.startsWith(`${connectionId}|`) && u === until && getAntigravityQuotaPool(k.slice(connectionId.length + 1)) === pool) {
+        strikeBlocks.delete(k);
+      }
+    }
   }
   const family = getAntigravityModelFamily(model);
   if (family === "claude_gpt" && cached?.claude_gpt_session?.resetAt === iso) {

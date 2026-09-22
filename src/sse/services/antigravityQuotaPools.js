@@ -12,8 +12,8 @@
  *
  * Cache keys produced by open-sse/services/usage/google.js (getAntigravityUsage):
  *   - per-model entries:  "gemini-3.8-flash-high", "claude-sonnet-4-6", ...
- *   - summary entries:     "gemini_weekly", "gemini_5h",
- *                          "claude_gpt_weekly", "claude_gpt_5h"
+ *   - summary entries:     "gemini_weekly", "gemini_5h" (or legacy "gemini_session"),
+ *                          "claude_gpt_weekly", "claude_gpt_5h" (or legacy "claude_gpt_session")
  *     (open-sse/services/usage/antigravity-weekly.js)
  */
 
@@ -24,13 +24,16 @@ const CLAUDE_GPT_POOL_ID = "claude_gpt";
 // in open-sse/services/usage/google.js — keep both in sync).
 const POOL_MODELS = {
   [GEMINI_POOL_ID]: [
+    "gemini-4-argon-high",
     "gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low",
     "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low",
     "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low",
     "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low",
-    "gemini-pro-agent", "gemini-3.1-pro-low", "gemini-3.1-flash-image",
+    "gemini-3.1-pro-high", "gemini-pro-agent", "gemini-3.1-pro-low", "gemini-3.1-flash-image",
   ],
   [CLAUDE_GPT_POOL_ID]: [
+    "claude-sonnet-5-5-high", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low", "claude-sonnet-5-5",
+    "claude-opus-5-5-high", "claude-opus-5-5-medium", "claude-opus-5-5-low", "claude-opus-5-5",
     "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium",
   ],
 };
@@ -51,9 +54,11 @@ export function getAntigravityQuotaPool(model) {
 function getPoolWindows(quotas, pool) {
   const weeklyKey = `${pool}_weekly`;
   const fiveHourKey = `${pool}_5h`;
+  const legacySessionKey = `${pool}_session`;
   return {
     weekly: quotas?.[weeklyKey] || null,
-    fiveHour: quotas?.[fiveHourKey] || null,
+    fiveHour: quotas?.[fiveHourKey] || quotas?.[legacySessionKey] || null,
+    fiveHourKey: quotas?.[fiveHourKey] ? fiveHourKey : (quotas?.[legacySessionKey] ? legacySessionKey : fiveHourKey),
   };
 }
 
@@ -72,13 +77,13 @@ export function getPoolEntriesForModel(quotas, model) {
   if (!pool) return [];
 
   const entries = [];
-  const { weekly, fiveHour } = getPoolWindows(quotas, pool);
+  const { weekly, fiveHour, fiveHourKey } = getPoolWindows(quotas, pool);
   if (weekly) entries.push({ key: `${pool}_weekly`, entry: weekly });
-  if (fiveHour) entries.push({ key: `${pool}_5h`, entry: fiveHour });
+  if (fiveHour) entries.push({ key: fiveHourKey, entry: fiveHour });
 
   for (const [key, entry] of Object.entries(quotas)) {
-    if (key === "gemini_weekly" || key === "gemini_5h") continue;
-    if (key === "claude_gpt_weekly" || key === "claude_gpt_5h") continue;
+    if (key === "gemini_weekly" || key === "gemini_5h" || key === "gemini_session") continue;
+    if (key === "claude_gpt_weekly" || key === "claude_gpt_5h" || key === "claude_gpt_session") continue;
     if (getAntigravityQuotaPool(key) !== pool) continue;
     if (!entry) continue;
     entries.push({ key, entry });
@@ -139,7 +144,7 @@ export function findPoolBlockForModel(quotas, model) {
   // 5h: only meaningful when reported and not disabled. A disabled 5h bucket
   // means the weekly window is the binding constraint (already handled above).
   if (fiveHour && fiveHour.disabled !== true) {
-    consider(fiveHour, `${pool}_5h`);
+    consider(fiveHour, getPoolWindows(quotas || {}, pool).fiveHourKey);
   }
 
   if (blockResetAt) return { blocked: true, resetAt: blockResetAt, key: blockKey };
@@ -148,7 +153,7 @@ export function findPoolBlockForModel(quotas, model) {
   // family reads exhausted (each sibling otherwise keeps the pool routable).
   const entries = [];
   for (const [key, entry] of Object.entries(quotas || {})) {
-    if (key.endsWith("_weekly") || key.endsWith("_5h")) continue;
+    if (key.endsWith("_weekly") || key.endsWith("_5h") || key.endsWith("_session")) continue;
     if (getAntigravityQuotaPool(key) !== pool) continue;
     if (entry) entries.push(entry);
   }
