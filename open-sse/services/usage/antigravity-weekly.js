@@ -127,11 +127,12 @@ export function parseWeeklyQuotaSummary(data) {
       const window = detectWindow(bucket);
       if (!window) continue;
 
-      // Disabled weekly buckets are truly disabled and skipped. Disabled 5h
-      // buckets are retained at 0% because they signal weekly exhaustion.
-      if (bucket.disabled === true && window === "weekly") continue;
-
-      const remainingFraction = bucket.disabled === true ? 0 : Number(bucket.remainingFraction);
+      // Disabled 5h buckets are retained at 0% because they signal weekly
+      // exhaustion. Disabled weekly buckets are retained with their upstream
+      // fraction so cache consumers can still see the weekly reset window.
+      const remainingFraction = bucket.disabled === true && window === "5h"
+        ? 0
+        : Number(bucket.remainingFraction);
       if (!Number.isFinite(remainingFraction)) continue;
 
       for (const matcher of GROUP_MATCHERS) {

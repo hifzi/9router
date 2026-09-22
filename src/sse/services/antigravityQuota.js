@@ -236,7 +236,7 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
     const candidates = [
       quota,
       pool ? quotas?.[`${pool}_weekly`] : null,
-      pool ? quotas?.[`${pool}_5h`] : null,
+      pool ? (quotas?.[`${pool}_5h`] || quotas?.[`${pool}_session`]) : null,
     ].filter(q => q?.resetAt && Date.parse(q.resetAt) > Date.now());
     const resetCandidate = candidates.sort((a, b) => Date.parse(b.resetAt) - Date.parse(a.resetAt))[0];
     const resetAt = resetCandidate?.resetAt || new Date(Date.now() + STRIKE_BLOCK_MS).toISOString();
