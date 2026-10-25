@@ -555,3 +555,49 @@ Environment variables actively used by code:
 - `GET /api/settings`
 - `GET /api/v1/models`
 - CLI target base URL should be `http://<host>:20128/v1` when `PORT=20128`
+
+
+## ADR: Fork upgrade to v0.5.109 with Antigravity smart cache (2026-10-26)
+
+Status: accepted scope, requested by the fork owner.
+
+- Integrate upstream tag `v0.5.109` (`f39d8f07`) into
+  `feat/antigravity-pool-aware-routing`; retain the fork's pool-aware quota
+  routing, grouped quota display, subscription badges, dashboard cache ingestion,
+  and background token-refresh warm-up.
+- Preserve the existing two-pool model: Gemini and Claude/GPT have independent
+  account quotas. Weekly exhaustion or an active exhausted 5h window blocks its
+  pool until reset; absent 5h windows do not block Free/Plus accounts.
+- Preserve existing 409/429 strike handling and account-specific 503 capacity
+  fit blocks. Keep concurrent refresh coalescing and the 30-second refresh gate.
+- Extend synthesized Gemini pool blocks to Gemini 4 Argon high/medium/low,
+  including tiers selected by upstream's request reasoning-effort resolver.
+- Retain upstream's other provider/dashboard changes, including quota color
+  percentages, while preserving Antigravity's disabled-window presentation.
+- Build and install the fork locally. Do not open a pull request or publish an
+  npm release. Local launch configuration and existing connection data remain
+  in use.
+
+Validation: Antigravity quota/pool/warm-up tests, upstream routing regression
+suite, production CLI build, packaged installation, and local runtime checks.
+
+Verification results for this integration:
+
+- 204 focused/regression tests passed; 6 skipped, including upstream Smart
+  Router coverage, Antigravity quota routing/pools, background warm-up, and
+  quota dashboard visibility.
+- Production CLI bundle built successfully; all 3,440 staged app files matched
+  the globally installed app by SHA-256. CLI and running `/api/version` report
+  `0.5.109`; `/api/health` returns `{ "ok": true }`.
+- The broad unit run initially reported 29 failed tests and two suite-load
+  errors. Three stale fork visibility assertions were updated for existing
+  pool window keys; a local SQLite native ABI mismatch was rebuilt and its
+  affected regression passed. The other 24 deterministic failures were
+  reproduced on pristine upstream v0.5.109. The MiMo live test depends on the
+  external service (returned HTTP 400). Upstream suite-load errors require
+  undeclared `lowdb` and the absent `cloud/` source tree. The full suite is
+  therefore not claimed green.
+- The pre-upgrade database, workspace CLI app, global installation, and
+  launch-agent configuration were backed up under the ignored local path
+  `.scratch/v0.5.109/backup/` before replacement. Existing launch-agent settings
+  continue to start the rebuilt workspace CLI.

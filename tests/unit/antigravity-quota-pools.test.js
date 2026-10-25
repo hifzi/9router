@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getModelUpstreamId } from "../../open-sse/config/providerModels.js";
 
 const mocks = vi.hoisted(() => ({
   getProviderConnections: vi.fn(),
@@ -204,6 +205,30 @@ describe("pool block detection", () => {
 });
 
 describe("pool block synthesis & propagation", () => {
+  it.each(["high", "medium", "low"])("propagates a Gemini 4 Argon %s capacity block to every tier without blocking Claude", async (tier) => {
+    const connectionId = `ag-argon-${tier}`;
+    mocks.getAntigravityUsage.mockResolvedValue({ quotas: {
+      gemini_weekly: { remainingPercentage: 12, resetAt: WEEKLY_RESET },
+      claude_gpt_weekly: { remainingPercentage: 95, resetAt: WEEKLY_RESET },
+    } });
+    const upstreamModel = getModelUpstreamId("ag", "gemini-4-argon", { reasoning_effort: tier });
+    const model = upstreamModel.replace(/\([^()]+\)$/, "");
+    expect(model).toBe(`gemini-4-argon-${tier}`);
+
+    await expect(handleAntigravityQuotaError(connectionId, 503, model, "token", {}))
+      .resolves.toBe(Date.parse(WEEKLY_RESET));
+    const cached = getAntigravityQuotaCache().get(connectionId);
+    mocks.getProviderConnections.mockResolvedValue([{ id: connectionId, isActive: true }]);
+    for (const sibling of ["high", "medium", "low"]) {
+      const siblingModel = `gemini-4-argon-${sibling}`;
+      expect(cached[siblingModel]).toMatchObject({ remainingPercentage: 0, resetAt: WEEKLY_RESET });
+      await expect(getProviderCredentials("antigravity", null, siblingModel))
+        .resolves.toMatchObject({ allRateLimited: true, retryAfter: WEEKLY_RESET });
+    }
+    await expect(getProviderCredentials("antigravity", null, CLAUDE))
+      .resolves.toMatchObject({ connectionId });
+  });
+
   it("503 MODEL_CAPACITY_EXHAUSTED pool-blocks that account immediately, at any remaining percentage", async () => {
     // Upstream 503 "No capacity" is an authoritative "request doesn't fit"
     // signal: whatever the remaining percentage, the next turn of the same

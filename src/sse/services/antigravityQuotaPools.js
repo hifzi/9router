@@ -24,7 +24,7 @@ const CLAUDE_GPT_POOL_ID = "claude_gpt";
 // in open-sse/services/usage/google.js — keep both in sync).
 const POOL_MODELS = {
   [GEMINI_POOL_ID]: [
-    "gemini-4-argon-high",
+    "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
     "gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low",
     "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low",
     "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low",

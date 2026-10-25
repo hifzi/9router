@@ -29,11 +29,11 @@ describe("provider quota visibility", () => {
   it("groups Antigravity model quotas into Gemini and Claude families", () => {
     const quotas = parseQuotaData("antigravity", data);
     expect(quotas.map((q) => q.modelKey)).toEqual([
-      "gemini",
-      "claude",
+      "gemini_weekly",
+      "claude_gpt_weekly",
     ]);
-    expect(quotas[0].name).toBe("Gemini (Flash / Pro)");
-    expect(quotas[1].name).toBe("Claude (Sonnet / Opus)");
+    expect(quotas[0].name).toBe("Gemini (Weekly)");
+    expect(quotas[1].name).toBe("Claude & GPT (Weekly)");
   });
 
   it("shows all quotas by default and hides configured provider rows", () => {
@@ -41,34 +41,34 @@ describe("provider quota visibility", () => {
     expect(filterQuotasByVisibility("antigravity", quotas, {})).toHaveLength(2);
 
     const visibility = {
-      antigravity: { hidden: ["claude"] },
+      antigravity: { hidden: ["claude_gpt_weekly"] },
     };
     const visible = filterQuotasByVisibility("antigravity", quotas, visibility);
     const hidden = getHiddenQuotaRows("antigravity", quotas, visibility);
 
-    expect(visible.map((q) => q.modelKey)).toEqual(["gemini"]);
-    expect(hidden.map((q) => q.modelKey)).toEqual(["claude"]);
+    expect(visible.map((q) => q.modelKey)).toEqual(["gemini_weekly"]);
+    expect(hidden.map((q) => q.modelKey)).toEqual(["claude_gpt_weekly"]);
   });
 
   it("trims stale or obsolete model keys", () => {
     const quotas = parseQuotaData("antigravity", data);
-    const trimmed = trimHiddenQuotaKeys(["claude", "stale-model-xyz", "gemini-3.8-flash-low"], quotas);
-    expect(trimmed).toEqual(["claude"]);
+    const trimmed = trimHiddenQuotaKeys(["claude_gpt_weekly", "stale-model-xyz", "gemini-3.8-flash-low"], quotas);
+    expect(trimmed).toEqual(["claude_gpt_weekly"]);
 
     const visibility = {
-      antigravity: { hidden: ["claude", "stale-model-xyz"] },
+      antigravity: { hidden: ["claude_gpt_weekly", "stale-model-xyz"] },
     };
     const visible = filterQuotasByVisibility("antigravity", quotas, visibility);
     const hidden = getHiddenQuotaRows("antigravity", quotas, visibility);
 
-    expect(visible.map((q) => q.modelKey)).toEqual(["gemini"]);
-    expect(hidden.map((q) => q.modelKey)).toEqual(["claude"]);
+    expect(visible.map((q) => q.modelKey)).toEqual(["gemini_weekly"]);
+    expect(hidden.map((q) => q.modelKey)).toEqual(["claude_gpt_weekly"]);
   });
 
   it("does not apply one provider hidden list to another provider", () => {
     const quotas = parseQuotaData("antigravity", data);
     const visibility = {
-      codex: { hidden: ["gemini"] },
+      codex: { hidden: ["gemini_weekly"] },
     };
     expect(filterQuotasByVisibility("antigravity", quotas, visibility)).toHaveLength(2);
   });
